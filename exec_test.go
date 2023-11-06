@@ -113,8 +113,8 @@ func TestZfsList(t *testing.T) {
 			}
 			return []byte("NAME                          LABEL:NOSNAP  LABEL:RUNNING\n" +
 				"rpool                         -             -\n" +
-				"rpool/ROOT                    nosnap        -\n" +
-				"rpool/data/subvol-952-disk-0  -             running"), nil
+				"rpool/ROOT                    nosnap        stopped\n" +
+				"rpool/data/subvol-952-disk-0  -             HOST-1"), nil
 		},
 	}
 
@@ -126,9 +126,9 @@ func TestZfsList(t *testing.T) {
 
 	// check the result
 	expectesZfsList := []zfs{
-		{name: "rpool", nosnap: false, running: false},
-		{name: "rpool/ROOT", nosnap: true, running: false},
-		{name: "rpool/data/subvol-952-disk-0", nosnap: false, running: true},
+		{name: "rpool", nosnap: false, running: "-"},
+		{name: "rpool/ROOT", nosnap: true, running: "stopped"},
+		{name: "rpool/data/subvol-952-disk-0", nosnap: false, running: "HOST-1"},
 	}
 	if !reflect.DeepEqual(zfsList, expectesZfsList) {
 		t.Errorf("unexpected datasets: got %v, want %v", zfsList, expectesZfsList)

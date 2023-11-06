@@ -8,11 +8,12 @@ import (
 )
 
 type Pending struct {
-	Pool         string
-	Snapshots    []string
-	Destroys     []string
-	SetRunning   []string
-	UnsetRunning []string
+	Pool       string
+	Hosname    string
+	Snapshots  []string
+	Destroys   []string
+	SetRunning []string
+	SetStopped []string
 }
 
 func (p *Pending) Run() error {
@@ -28,11 +29,13 @@ func (p *Pending) Run() error {
 		// fmt.Println("destroys", p.Destroys)
 	}
 	if len(p.SetRunning) > 0 {
-		_, _ = program(p.Pool, "lua_set_running", p.SetRunning)
+		args := append([]string{p.Hosname}, p.SetRunning...)
+		_, _ = program(p.Pool, "lua_set_running", args)
 		// fmt.Println("set_running", p.SetRunning)
 	}
-	if len(p.UnsetRunning) > 0 {
-		_, _ = program(p.Pool, "lua_unset_running", p.UnsetRunning)
+	if len(p.SetStopped) > 0 {
+		args := append([]string{"stopped"}, p.SetStopped...)
+		_, _ = program(p.Pool, "lua_set_running", args)
 		// fmt.Println("unset_running", p.UnsetRunning)
 	}
 	return nil

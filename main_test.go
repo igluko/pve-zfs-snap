@@ -57,39 +57,48 @@ func TestGetRunningVMIDs(t *testing.T) {
 	}
 }
 func TestGetPendingStoppedZFS(t *testing.T) {
+	hostname := "HOST-1"
 	allZFS := []zfs{
-		{name: "zfs1", running: true},
-		{name: "zfs2", running: true},
-		{name: "zfs3", running: true},
-		{name: "zfs4", running: false},
+		{name: "zfs1", running: hostname},
+		{name: "zfs2", running: "HOST-2"},
+		{name: "zfs3", running: "-"},
+		{name: "zfs4", running: "stopped"},
+		{name: "zfs5", running: hostname},
 	}
 	runningZFS := []zfs{
-		{name: "zfs1", running: true},
-		{name: "zfs3", running: true},
+		{name: "zfs5", running: hostname},
 	}
 	expected := []zfs{
-		{name: "zfs2", running: true},
+		{name: "zfs1", running: hostname},
+		{name: "zfs3", running: "-"},
 	}
-	got := getPendingStopZFS(allZFS, runningZFS)
+	got := getPendingStopZFS(allZFS, runningZFS, hostname)
 	if !reflect.DeepEqual(got, expected) {
 		t.Errorf("getPendingStoppedZFS() = %v, want %v", got, expected)
 	}
 }
+
 func TestGetPendingStartZFS(t *testing.T) {
+	hostname := "HOST-1"
 	allZFS := []zfs{
-		{name: "zfs1", running: true},
-		{name: "zfs2", running: true},
-		{name: "zfs3", running: false},
-		{name: "zfs4", running: false},
+		{name: "zfs1", running: hostname},
+		{name: "zfs2", running: "HOST-2"},
+		{name: "zfs3", running: "-"},
+		{name: "zfs4", running: "stopped"},
+		{name: "zfs5", running: hostname},
 	}
 	runningZFS := []zfs{
-		{name: "zfs1", running: true},
-		{name: "zfs3", running: false},
+		{name: "zfs1", running: hostname},
+		{name: "zfs2", running: "HOST-2"},
+		{name: "zfs3", running: "-"},
+		{name: "zfs4", running: "stopped"},
 	}
 	expected := []zfs{
-		{name: "zfs3", running: false},
+		{name: "zfs2", running: "HOST-2"},
+		{name: "zfs3", running: "-"},
+		{name: "zfs4", running: "stopped"},
 	}
-	got := getPendingStartZFS(allZFS, runningZFS)
+	got := getPendingStartZFS(allZFS, runningZFS, hostname)
 	if !reflect.DeepEqual(got, expected) {
 		t.Errorf("getPendingStartZFS() = %v, want %v", got, expected)
 	}
@@ -173,7 +182,7 @@ func TestProcessSnapshots_yearly(t *testing.T) {
 	pending.SetRunning = []string{
 		"datasetC",
 	}
-	pending.UnsetRunning = []string{
+	pending.SetStopped = []string{
 		"datasetD",
 	}
 
@@ -216,7 +225,7 @@ func TestProcessSnapshots_yearly(t *testing.T) {
 		SetRunning: []string{
 			"datasetC",
 		},
-		UnsetRunning: []string{
+		SetStopped: []string{
 			"datasetD",
 		},
 	}
@@ -241,7 +250,7 @@ func TestProcessSnapshots_frequently(t *testing.T) {
 	pending.SetRunning = []string{
 		"datasetC",
 	}
-	pending.UnsetRunning = []string{
+	pending.SetStopped = []string{
 		"datasetD",
 	}
 
@@ -296,7 +305,7 @@ func TestProcessSnapshots_frequently(t *testing.T) {
 		SetRunning: []string{
 			"datasetC",
 		},
-		UnsetRunning: []string{
+		SetStopped: []string{
 			"datasetD",
 		},
 	}
@@ -321,7 +330,7 @@ func TestProcessSnapshots_monthly(t *testing.T) {
 	pending.SetRunning = []string{
 		"datasetC",
 	}
-	pending.UnsetRunning = []string{
+	pending.SetStopped = []string{
 		"datasetD",
 	}
 
@@ -363,7 +372,7 @@ func TestProcessSnapshots_monthly(t *testing.T) {
 		SetRunning: []string{
 			"datasetC",
 		},
-		UnsetRunning: []string{
+		SetStopped: []string{
 			"datasetD",
 		},
 	}

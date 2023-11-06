@@ -27,8 +27,9 @@ type policy struct {
 }
 
 type environment struct {
-	path string
-	time struct {
+	hostname string
+	path     string
+	time     struct {
 		unix  int64
 		human string
 	}
@@ -71,9 +72,6 @@ func checkCallLuaCode(args []string) error {
 	case "lua_set_running":
 		fmt.Println(lua_set_running())
 		os.Exit(0)
-	case "lua_unset_running":
-		fmt.Println(lua_unset_running())
-		os.Exit(0)
 	}
 	return nil
 }
@@ -110,7 +108,20 @@ func getEnvironment(args []string) (environment, error) {
 	env.path = args[0]
 	env.time.human = time.Now().Format("2006-01-02_15:04:05")
 	env.time.unix = time.Now().Unix()
+	env.hostname, _ = os.Hostname()
 	return env, nil
+}
+
+// Получение всех VMIDs
+func getAllVMIDs(qmList []qm, pctList []pct) []string {
+	var vmIDs []string
+	for _, vm := range qmList {
+		vmIDs = append(vmIDs, vm.vmid)
+	}
+	for _, ct := range pctList {
+		vmIDs = append(vmIDs, ct.vmid)
+	}
+	return vmIDs
 }
 
 // Получение Running VMIDs
@@ -147,13 +158,15 @@ func filterZfsInVms(zfsList []zfs, vmIDs []string) []zfs {
 }
 
 // Получение датасетов, после остановки VM
-func getPendingStopZFS(allZFS []zfs, runningZFS []zfs) []zfs {
+func getPendingStopZFS(allZFS []zfs, runningZFS []zfs, hostname string) []zfs {
 	var pendingStoppedZFS []zfs
 	for _, zfs := range allZFS {
 		if slices.Contains(runningZFS, zfs) {
 			continue
 		}
-		if zfs.running {
+		// Обрабатываем остановленные VM, только если они были запущены на этом хосте
+		// или если они не были запущены вообще
+		if zfs.running == hostname || zfs.running == "-" {
 			pendingStoppedZFS = append(pendingStoppedZFS, zfs)
 		}
 	}
@@ -161,13 +174,13 @@ func getPendingStopZFS(allZFS []zfs, runningZFS []zfs) []zfs {
 }
 
 // Получение датасетов, после остановки VM
-func getPendingStartZFS(allZFS []zfs, runningZFS []zfs) []zfs {
+func getPendingStartZFS(allZFS []zfs, runningZFS []zfs, hostname string) []zfs {
 	var pendingStartZFS []zfs
 	for _, zfs := range allZFS {
 		if !slices.Contains(runningZFS, zfs) {
 			continue
 		}
-		if !zfs.running {
+		if zfs.running != hostname {
 			pendingStartZFS = append(pendingStartZFS, zfs)
 		}
 	}
@@ -177,7 +190,7 @@ func getPendingStartZFS(allZFS []zfs, runningZFS []zfs) []zfs {
 func processPendingsZFS(pending *Pending, pendingStopZFS []zfs, pendingStartZFS []zfs, env environment) {
 	for _, zfs := range pendingStopZFS {
 		pending.Snapshots = append(pending.Snapshots, fmt.Sprintf("%s@autosnap_%s_stopped", zfs.name, env.time.human))
-		pending.UnsetRunning = append(pending.UnsetRunning, zfs.name)
+		pending.SetStopped = append(pending.SetStopped, zfs.name)
 	}
 	for _, zfs := range pendingStartZFS {
 		pending.SetRunning = append(pending.SetRunning, zfs.name)
@@ -279,19 +292,24 @@ func main() {
 	checkErr(err)
 	pctList, err := PctList(executor)
 	checkErr(err)
+	allVMIDs := getAllVMIDs(qmList, pctList)
 	runningVMIDs := getRunningVMIDs(qmList, pctList)
 
 	for _, pool := range poolList {
-		pending := Pending{Pool: pool}
+		pending := Pending{Pool: pool, Hosname: env.hostname}
 
 		allZFS, err := ZFSlist(executor, pool)
 		checkErr(err)
 
+		// все датасеты, которые связаны с VM
+		allZFS = filterZfsInVms(allZFS, allVMIDs)
+
+		// датасеты, которые связаны с запущенными VM
 		runningZFS := filterZfsInVms(allZFS, runningVMIDs)
 
-		pendingStopZFS := getPendingStopZFS(allZFS, runningZFS)
+		pendingStopZFS := getPendingStopZFS(allZFS, runningZFS, env.hostname)
 
-		pendingStartZFS := getPendingStartZFS(allZFS, runningZFS)
+		pendingStartZFS := getPendingStartZFS(allZFS, runningZFS, env.hostname)
 
 		processPendingsZFS(&pending, pendingStopZFS, pendingStartZFS, env)
 

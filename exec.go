@@ -35,7 +35,7 @@ type pct struct {
 type zfs struct {
 	name    string
 	nosnap  bool
-	running bool
+	running string
 }
 
 type snapshot struct {
@@ -142,7 +142,7 @@ func ZFSlist(e Exec, pool string) ([]zfs, error) {
 		zfsList[i] = zfs{
 			name:    line[0],
 			nosnap:  line[1] == "nosnap",
-			running: line[2] == "running",
+			running: line[2],
 		}
 	}
 	return zfsList, nil
