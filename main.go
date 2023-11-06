@@ -37,9 +37,9 @@ type environment struct {
 
 func help() {
 	fmt.Println("Все параметры параметры должены иметь формат '<one_letter><int>'")
-	fmt.Println("  Пример использования: zfs-rotate.sh f100000")
+	fmt.Println("  Пример использования: ./pve-zfs-snap f100000")
 	fmt.Println("Возожные ключи и их описания:")
-	fmt.Println("  f<int> - количество frequently снимков (обязательный параметр)")
+	fmt.Println("  f<int> - количество frequently снимков")
 	fmt.Println("  h<int> - количество hourly снимков")
 	fmt.Println("  d<int> - количество daily снимков")
 	fmt.Println("  m<int> - количество monthly снимков")
