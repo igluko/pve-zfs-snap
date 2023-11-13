@@ -256,7 +256,7 @@ func processSnapshots(
 		return
 	}
 
-	if timeLast+policy.interval < timeNowUnix {
+	if timeLast+policy.interval < timeNowUnix+60 {
 		pending.Snapshots = append(
 			pending.Snapshots,
 			fmt.Sprintf("%s@autosnap_%s_%s", zfsName, timeNowHuman, snapshotType),
