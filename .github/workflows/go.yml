@@ -32,10 +32,10 @@ jobs:
       with:
         script: |
           const { owner, repo } = context.repo;
-          const releases = await github.repos.listReleases({ owner, repo });
+          const releases = await github.rest.repos.listReleases({ owner, repo });
           for (const release of releases.data) {
             if (release.tag_name === 'latest') {
-              await github.repos.deleteRelease({
+              await github.rest.repos.deleteRelease({
                 owner,
                 repo,
                 release_id: release.id,
@@ -45,14 +45,19 @@ jobs:
           }
           // Удаляем тег 'latest', если он существует
           try {
-            await github.git.deleteRef({
+            await github.rest.git.deleteRef({
               owner,
               repo,
               ref: 'tags/latest',
             });
           } catch (error) {
+            if (error.status !== 422) {
+              throw error;
+            }
             // Игнорируем ошибку, если тега нет
           }
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Создать новый релиз с тегом 'latest'
       id: create_release
