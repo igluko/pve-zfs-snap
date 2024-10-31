@@ -1,166 +1,182 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
 type MockExec struct {
-	commandFunc func(name string, arg ...string) ([]byte, error)
+	Outputs map[string][]byte
+	Errors  map[string]error
 }
 
-func (m MockExec) Command(name string, arg ...string) ([]byte, error) {
-	return m.commandFunc(name, arg...)
+func (m *MockExec) Command(name string, arg ...string) ([]byte, error) {
+	key := name + " " + strings.Join(arg, " ")
+	if err, ok := m.Errors[key]; ok {
+		return nil, err
+	}
+	if output, ok := m.Outputs[key]; ok {
+		return output, nil
+	}
+	return nil, fmt.Errorf("command not found: %s", key)
 }
 
-func TestQmList(t *testing.T) {
-	// create a mock executor
-	mockExecutor := &MockExec{
-		commandFunc: func(name string, arg ...string) ([]byte, error) {
-			expectedName := "qm"
-			expectedArg := []string{"list"}
-			if name != expectedName || !reflect.DeepEqual(arg, expectedArg) {
-				t.Errorf("unexpected command: got %v %v, want %v %v", name, arg, expectedName, expectedArg)
-			}
-			return []byte("      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID\n" +
-				"       901 MikroTik-bot-test    running    1024               0.12 3678283\n" +
-				"       951 repl-test2           running    2048              32.00 3679206\n" +
-				"       953 test-savelov-emptyvm stopped    1024               0.12 0\n"), nil
+func TestGetVMs(t *testing.T) {
+	sampleOutput := `[
+	   {
+		  "cpu" : 0.00299916133057372,
+		  "disk" : 0,
+		  "diskread" : 472992073728,
+		  "diskwrite" : 608784817664,
+		  "id" : "qemu/100",
+		  "maxcpu" : 4,
+		  "maxdisk" : 53687091200,
+		  "maxmem" : 5293211648,
+		  "mem" : 2495614976,
+		  "name" : "Terminal-Simbirsk",
+		  "netin" : 10836356743,
+		  "netout" : 525029614,
+		  "node" : "AX101-Hels-03",
+		  "status" : "running",
+		  "template" : 0,
+		  "type" : "qemu",
+		  "uptime" : 20124577,
+		  "vmid" : 100
+	   },
+	   {
+		  "cpu" : 0,
+		  "disk" : 0,
+		  "diskread" : 0,
+		  "diskwrite" : 0,
+		  "id" : "lxc/952",
+		  "maxcpu" : 1,
+		  "maxdisk" : 8589934592,
+		  "maxmem" : 536870912,
+		  "mem" : 0,
+		  "name" : "test-savelov-empty",
+		  "netin" : 0,
+		  "netout" : 0,
+		  "node" : "AX101-Falk-01",
+		  "status" : "stopped",
+		  "template" : 0,
+		  "type" : "lxc",
+		  "uptime" : 0,
+		  "vmid" : 952
+	   }
+	]`
+
+	mockExec := &MockExec{
+		Outputs: map[string][]byte{
+			"pvesh get /cluster/resources --type vm --output-format json": []byte(sampleOutput),
 		},
 	}
 
-	// call the function being tested
-	qms, err := QmList(mockExecutor)
+	node := "AX101-Hels-03"
+
+	vms, err := GetVMs(mockExec, node)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatalf("GetVMs returned error: %v", err)
 	}
 
-	// check the result
-	expectedQms := []qm{
-		{vmid: "901", name: "MikroTik-bot-test", status: "running", mem: "1024", disk: "0.12", pid: "3678283"},
-		{vmid: "951", name: "repl-test2", status: "running", mem: "2048", disk: "32.00", pid: "3679206"},
-		{vmid: "953", name: "test-savelov-emptyvm", status: "stopped", mem: "1024", disk: "0.12", pid: "0"},
+	if len(vms) != 1 {
+		t.Fatalf("Expected 1 VM, got %d", len(vms))
 	}
-	if !reflect.DeepEqual(qms, expectedQms) {
-		t.Errorf("unexpected qms: got %v, want %v", qms, expectedQms)
+
+	vm := vms[0]
+	if vm.Node != node {
+		t.Errorf("Expected node %s, got %s", node, vm.Node)
+	}
+	if vm.VMID != 100 {
+		t.Errorf("Expected VMID 100, got %d", vm.VMID)
+	}
+	if vm.Name != "Terminal-Simbirsk" {
+		t.Errorf("Expected Name 'Terminal-Simbirsk', got '%s'", vm.Name)
 	}
 }
-func TestPctList(t *testing.T) {
-	// create a mock executor
-	mockExecutor := &MockExec{
-		commandFunc: func(name string, arg ...string) ([]byte, error) {
-			expectedName := "pct"
-			expectedArg := []string{"list"}
-			if name != expectedName || !reflect.DeepEqual(arg, expectedArg) {
-				t.Errorf("unexpected command: got %v %v, want %v %v", name, arg, expectedName, expectedArg)
-			}
-			return []byte("VMID       Status     Lock         Name\n" +
-				"952        running                 test-vm-1\n" +
-				"953        stopped                 test-vm-2\n"), nil
-		},
+
+func TestGetAllVMIDs(t *testing.T) {
+	vms := []VM{
+		{VMID: 100},
+		{VMID: 952},
 	}
 
-	// call the function being tested
-	pcts, err := PctList(mockExecutor)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	vmIDs := GetAllVMIDs(vms)
+	expectedVMIDs := []int{100, 952}
 
-	// check the result
-	expectedPcts := []pct{
-		{vmid: "952", status: "running", lock: "", name: "test-vm-1"},
-		{vmid: "953", status: "stopped", lock: "", name: "test-vm-2"},
-	}
-	if !reflect.DeepEqual(pcts, expectedPcts) {
-		t.Errorf("unexpected pcts: got %v, want %v", pcts, expectedPcts)
+	if !reflect.DeepEqual(vmIDs, expectedVMIDs) {
+		t.Errorf("Expected VMIDs %v, got %v", expectedVMIDs, vmIDs)
 	}
 }
+
 func TestZpoolList(t *testing.T) {
-	// create a mock executor
-	mockExecutor := &MockExec{
-		commandFunc: func(name string, arg ...string) ([]byte, error) {
-			expectedName := "zpool"
-			expectedArg := []string{"list", "-H", "-o", "name"}
-			if name != expectedName || !reflect.DeepEqual(arg, expectedArg) {
-				t.Errorf("unexpected command: got %v %v, want %v %v", name, arg, expectedName, expectedArg)
-			}
-			return []byte("tank\n" +
-				"backup\n"), nil
+	mockExec := &MockExec{
+		Outputs: map[string][]byte{
+			"zpool list -H -o name": []byte("tank\nbackup\n"),
 		},
 	}
 
-	// call the function being tested
-	zpools, err := ZpoolList(mockExecutor)
+	zpools, err := ZpoolList(mockExec)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// check the result
 	expectedZpools := []string{"tank", "backup"}
 	if !reflect.DeepEqual(zpools, expectedZpools) {
 		t.Errorf("unexpected zpools: got %v, want %v", zpools, expectedZpools)
 	}
 }
-func TestZfsList(t *testing.T) {
+
+func TestZFSlist(t *testing.T) {
 	pool := "rpool"
-	// create a mock executor
-	mockExecutor := &MockExec{
-		commandFunc: func(name string, arg ...string) ([]byte, error) {
-			expectedName := "zfs"
-			expectedArg := []string{"list", "-o", "name,label:nosnap,label:running", "-r", pool}
-			if name != expectedName || !reflect.DeepEqual(arg, expectedArg) {
-				t.Errorf("unexpected command: got %v %v, want %v %v", name, arg, expectedName, expectedArg)
-			}
-			return []byte("NAME                          LABEL:NOSNAP  LABEL:RUNNING\n" +
-				"rpool                         -             -\n" +
-				"rpool/ROOT                    nosnap        stopped\n" +
-				"rpool/data/subvol-952-disk-0  -             HOST-1"), nil
+	mockExec := &MockExec{
+		Outputs: map[string][]byte{
+			"zfs list -o name,label:nosnap,label:running -r rpool": []byte(
+				"NAME                          LABEL:NOSNAP  LABEL:RUNNING\n" +
+					"rpool                         -             -\n" +
+					"rpool/ROOT                    nosnap        stopped\n" +
+					"rpool/data/subvol-952-disk-0  -             HOST-1\n"),
 		},
 	}
 
-	// call the function being tested
-	zfsList, err := ZFSlist(mockExecutor, pool)
+	zfsList, err := ZFSlist(mockExec, pool)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// check the result
-	expectesZfsList := []zfs{
+	expectedZfsList := []zfs{
 		{name: "rpool", nosnap: false, running: "-"},
 		{name: "rpool/ROOT", nosnap: true, running: "stopped"},
 		{name: "rpool/data/subvol-952-disk-0", nosnap: false, running: "HOST-1"},
 	}
-	if !reflect.DeepEqual(zfsList, expectesZfsList) {
-		t.Errorf("unexpected datasets: got %v, want %v", zfsList, expectesZfsList)
+
+	if !reflect.DeepEqual(zfsList, expectedZfsList) {
+		t.Errorf("unexpected datasets: got %v, want %v", zfsList, expectedZfsList)
 	}
 }
+
 func TestZfsListSnapshots(t *testing.T) {
 	zfs := "pool1/dataset1"
-	// create a mock executor
-	mockExecutor := &MockExec{
-		commandFunc: func(name string, arg ...string) ([]byte, error) {
-			expectedName := "zfs"
-			expectedArg := []string{"list", "-p", "-o", "name,creation", "-t", "snapshot", zfs}
-			if name != expectedName || !reflect.DeepEqual(arg, expectedArg) {
-				t.Errorf("unexpected command: got %v %v, want %v %v", name, arg, expectedName, expectedArg)
-			}
-			return []byte("NAME                                                          CREATION\n" +
-				"rpool/data/vm-950-disk-0@autosnap_2023-10-19_10:00:00_hourly  1697709600\n" +
-				"rpool/data/vm-950-disk-0@autosnap_2023-10-19_11:00:03_hourly  1697713203\n"), nil
+	mockExec := &MockExec{
+		Outputs: map[string][]byte{
+			"zfs list -p -o name,creation -t snapshot pool1/dataset1": []byte(
+				"NAME                                                          CREATION\n" +
+					"pool1/dataset1@autosnap_2023-10-19_10:00:00_hourly  1697709600\n" +
+					"pool1/dataset1@autosnap_2023-10-19_11:00:03_hourly  1697713203\n"),
 		},
 	}
 
-	// call the function being tested
-	snapshots, err := ZfsListSnapshots(mockExecutor, zfs)
+	snapshots, err := ZfsListSnapshots(mockExec, zfs)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// check the result
 	expectedSnapshots := []snapshot{
-		{name: "rpool/data/vm-950-disk-0@autosnap_2023-10-19_10:00:00_hourly", creation: 1697709600},
-		{name: "rpool/data/vm-950-disk-0@autosnap_2023-10-19_11:00:03_hourly", creation: 1697713203},
+		{name: "pool1/dataset1@autosnap_2023-10-19_10:00:00_hourly", creation: 1697709600},
+		{name: "pool1/dataset1@autosnap_2023-10-19_11:00:03_hourly", creation: 1697713203},
 	}
+
 	if !reflect.DeepEqual(snapshots, expectedSnapshots) {
 		t.Errorf("unexpected snapshots: got %v, want %v", snapshots, expectedSnapshots)
 	}

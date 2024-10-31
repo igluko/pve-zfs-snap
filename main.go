@@ -3,10 +3,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +18,7 @@ const (
 	daily      = "daily"
 	monthly    = "monthly"
 	yearly     = "yearly"
-	stopped    = "stopped" // для остановленных VM
+	stopped    = "stopped" // for stopped VMs
 )
 
 type policy struct {
@@ -37,17 +37,17 @@ type environment struct {
 }
 
 func help() {
-	fmt.Println("Все параметры параметры должены иметь формат '<one_letter><int>'")
-	fmt.Println("  Пример использования: ./pve-zfs-snap f100000")
-	fmt.Println("Возожные ключи и их описания:")
-	fmt.Println("  f<int> - количество frequently снимков")
-	fmt.Println("  h<int> - количество hourly снимков")
-	fmt.Println("  d<int> - количество daily снимков")
-	fmt.Println("  m<int> - количество monthly снимков")
-	fmt.Println("  y<int> - количество yearly снимков")
+	fmt.Println("All parameters must have the format '<one_letter><int>'")
+	fmt.Println("  Example usage: ./pve-zfs-snap f100000")
+	fmt.Println("Possible keys and their descriptions:")
+	fmt.Println("  f<int> - number of frequently snapshots")
+	fmt.Println("  h<int> - number of hourly snapshots")
+	fmt.Println("  d<int> - number of daily snapshots")
+	fmt.Println("  m<int> - number of monthly snapshots")
+	fmt.Println("  y<int> - number of yearly snapshots")
 }
 
-// готовим регулярное выражение для поиска типа снимка
+// Regular expression to match snapshot types
 var snapshotTypeRE = regexp.MustCompile(`@autosnap_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_([a-z]+)`)
 
 func init() {
@@ -56,7 +56,7 @@ func init() {
 
 func checkCallLuaCode(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("минимальное число параметров - 1")
+		return fmt.Errorf("minimum number of parameters is 1")
 	}
 
 	switch args[1] {
@@ -78,7 +78,7 @@ func checkCallLuaCode(args []string) error {
 
 func getEnvironment(args []string) (environment, error) {
 	if len(args) < 2 {
-		return environment{}, fmt.Errorf("минимальное число параметров - 1")
+		return environment{}, fmt.Errorf("minimum number of parameters is 1")
 	}
 
 	var env = environment{
@@ -88,7 +88,7 @@ func getEnvironment(args []string) (environment, error) {
 	for _, arg := range args[1:] {
 		i, err := strconv.Atoi(arg[1:])
 		if err != nil {
-			return environment{}, fmt.Errorf("параметр '%s' не является числом", arg)
+			return environment{}, fmt.Errorf("parameter '%s' is not a number", arg)
 		}
 		switch arg[0] {
 		case 'f':
@@ -96,13 +96,13 @@ func getEnvironment(args []string) (environment, error) {
 		case 'h':
 			env.policy[hourly] = policy{count: i, interval: 3600}
 		case 'd':
-			env.policy[hourly] = policy{count: i, interval: 3600 * 24}
+			env.policy[daily] = policy{count: i, interval: 3600 * 24}
 		case 'm':
-			env.policy[hourly] = policy{count: i, interval: 3600 * 24 * 30}
+			env.policy[monthly] = policy{count: i, interval: 3600 * 24 * 30}
 		case 'y':
-			env.policy[hourly] = policy{count: i, interval: 3600 * 24 * 365}
+			env.policy[yearly] = policy{count: i, interval: 3600 * 24 * 365}
 		default:
-			return environment{}, fmt.Errorf("неизвестный параметр '%s'", arg)
+			return environment{}, fmt.Errorf("unknown parameter '%s'", arg)
 		}
 	}
 	env.path = args[0]
@@ -112,43 +112,84 @@ func getEnvironment(args []string) (environment, error) {
 	return env, nil
 }
 
-// Получение всех VMIDs
-func getAllVMIDs(qmList []qm, pctList []pct) []string {
-	var vmIDs []string
-	for _, vm := range qmList {
-		vmIDs = append(vmIDs, vm.vmid)
+func checkErr(err error) {
+	if err != nil {
+		fmt.Println(err)
+		help()
+		os.Exit(1)
 	}
-	for _, ct := range pctList {
-		vmIDs = append(vmIDs, ct.vmid)
+}
+
+// VM represents a virtual machine or container
+type VM struct {
+	CPU       float64 `json:"cpu"`
+	Disk      int64   `json:"disk"`
+	DiskRead  int64   `json:"diskread"`
+	DiskWrite int64   `json:"diskwrite"`
+	ID        string  `json:"id"`
+	MaxCPU    int     `json:"maxcpu"`
+	MaxDisk   int64   `json:"maxdisk"`
+	MaxMem    int64   `json:"maxmem"`
+	Mem       int64   `json:"mem"`
+	Name      string  `json:"name"`
+	NetIn     int64   `json:"netin"`
+	NetOut    int64   `json:"netout"`
+	Node      string  `json:"node"`
+	Status    string  `json:"status"`
+	Template  int     `json:"template"`
+	Type      string  `json:"type"`
+	Uptime    int64   `json:"uptime"`
+	VMID      int     `json:"vmid"`
+}
+
+// GetVMs retrieves the list of VMs for the current node
+func GetVMs(e Exec, node string) ([]VM, error) {
+	output, err := e.Command("pvesh", "get", "/cluster/resources", "--type", "vm", "--output-format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var allVMs []VM
+	if err := json.Unmarshal(output, &allVMs); err != nil {
+		return nil, err
+	}
+	var nodeVMs []VM
+	for _, vm := range allVMs {
+		if vm.Node == node {
+			nodeVMs = append(nodeVMs, vm)
+		}
+	}
+	return nodeVMs, nil
+}
+
+// GetAllVMIDs extracts VMIDs from the list of VMs
+func GetAllVMIDs(vms []VM) []int {
+	var vmIDs []int
+	for _, vm := range vms {
+		vmIDs = append(vmIDs, vm.VMID)
 	}
 	return vmIDs
 }
 
-// Получение Running VMIDs
-func getRunningVMIDs(qmList []qm, pctList []pct) []string {
-	var vmIDs []string
-	for _, vm := range qmList {
-		if vm.status == "running" {
-			vmIDs = append(vmIDs, vm.vmid)
-		}
-	}
-	for _, ct := range pctList {
-		if ct.status == "running" {
-			vmIDs = append(vmIDs, ct.vmid)
+// GetRunningVMIDs extracts VMIDs of running VMs
+func GetRunningVMIDs(vms []VM) []int {
+	var vmIDs []int
+	for _, vm := range vms {
+		if vm.Status == "running" {
+			vmIDs = append(vmIDs, vm.VMID)
 		}
 	}
 	return vmIDs
 }
 
-// Получение датасетов, связанных со списом VM
-// Шаблон для поиска vm-<num>-disk-|subvol-<num>-disk-
-func filterZfsInVms(zfsList []zfs, vmIDs []string) []zfs {
+// Filter ZFS datasets related to a list of VMIDs
+func filterZfsInVms(zfsList []zfs, vmIDs []int) []zfs {
 	var filteredZfs []zfs
-	// Компилируем регулярное выражение
-	// Шаблон для поиска vm-<num>-disk-|subvol-<num>-disk-
-	vmidPatern := strings.Join(vmIDs, "|")
-	// Используем vmidPatern в выражении
-	re := regexp.MustCompile(fmt.Sprintf("vm-(%s)-disk-|subvol-(%s)-disk-", vmidPatern, vmidPatern))
+	vmidStrings := make([]string, len(vmIDs))
+	for i, vmid := range vmIDs {
+		vmidStrings[i] = strconv.Itoa(vmid)
+	}
+	vmidPattern := strings.Join(vmidStrings, "|")
+	re := regexp.MustCompile(fmt.Sprintf("vm-(%s)-disk-|subvol-(%s)-disk-", vmidPattern, vmidPattern))
 	for _, zfs := range zfsList {
 		if re.MatchString(zfs.name) {
 			filteredZfs = append(filteredZfs, zfs)
@@ -157,15 +198,23 @@ func filterZfsInVms(zfsList []zfs, vmIDs []string) []zfs {
 	return filteredZfs
 }
 
-// Получение датасетов, после остановки VM
+// Check if a zfs is in a list of zfs
+func containsZFS(zfsList []zfs, target zfs) bool {
+	for _, zfs := range zfsList {
+		if zfs.name == target.name {
+			return true
+		}
+	}
+	return false
+}
+
+// Get datasets pending stop action
 func getPendingStopZFS(allZFS []zfs, runningZFS []zfs, hostname string) []zfs {
 	var pendingStoppedZFS []zfs
 	for _, zfs := range allZFS {
-		if slices.Contains(runningZFS, zfs) {
+		if containsZFS(runningZFS, zfs) {
 			continue
 		}
-		// Обрабатываем остановленные VM, только если они были запущены на этом хосте
-		// или если они не были запущены вообще
 		if zfs.running == hostname || zfs.running == "-" {
 			pendingStoppedZFS = append(pendingStoppedZFS, zfs)
 		}
@@ -173,11 +222,11 @@ func getPendingStopZFS(allZFS []zfs, runningZFS []zfs, hostname string) []zfs {
 	return pendingStoppedZFS
 }
 
-// Получение датасетов, после остановки VM
+// Get datasets pending start action
 func getPendingStartZFS(allZFS []zfs, runningZFS []zfs, hostname string) []zfs {
 	var pendingStartZFS []zfs
 	for _, zfs := range allZFS {
-		if !slices.Contains(runningZFS, zfs) {
+		if !containsZFS(runningZFS, zfs) {
 			continue
 		}
 		if zfs.running != hostname {
@@ -197,9 +246,7 @@ func processPendingsZFS(pending *Pending, pendingStopZFS []zfs, pendingStartZFS 
 	}
 }
 
-// функция разбивки снимков на группы по типу
-// Пример: @autosnap_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}_yearly
-// Типы: frequently, hourly, daily, monthly, yearly
+// Split snapshots into groups by type
 func splitSnapshots(snapshots []snapshot) map[string][]snapshot {
 	group := make(map[string][]snapshot)
 	for _, snapshot := range snapshots {
@@ -213,7 +260,7 @@ func splitSnapshots(snapshots []snapshot) map[string][]snapshot {
 	return group
 }
 
-// Фильтрация nosnap zfs датасетов
+// Filter out nosnap datasets
 func filterNoSnap(zfsList []zfs) []zfs {
 	var filteredZFS []zfs
 	for _, zfs := range zfsList {
@@ -225,14 +272,15 @@ func filterNoSnap(zfsList []zfs) []zfs {
 	return filteredZFS
 }
 
-func checkErr(err error) {
-	if err != nil {
-		fmt.Println(err)
-		help()
-		os.Exit(1)
+func snapshotsToNames(snapshots []snapshot) []string {
+	snapshotNames := make([]string, len(snapshots))
+	for i, snapshot := range snapshots {
+		snapshotNames[i] = snapshot.name
 	}
+	return snapshotNames
 }
 
+// Process snapshots based on policy
 func processSnapshots(
 	pending *Pending,
 	snapshots []snapshot,
@@ -276,10 +324,9 @@ func main() {
 
 	env, err := getEnvironment(os.Args)
 	checkErr(err)
-	// fmt.Printf("%+v\n", env)
 
 	if isTerminal() {
-		fmt.Println("Запуск в режиме терминала")
+		fmt.Println("Running in terminal mode")
 		updateCron()
 	}
 
@@ -288,12 +335,11 @@ func main() {
 	poolList, err := ZpoolList(executor)
 	checkErr(err)
 
-	qmList, err := QmList(executor)
+	vms, err := GetVMs(executor, env.hostname)
 	checkErr(err)
-	pctList, err := PctList(executor)
-	checkErr(err)
-	allVMIDs := getAllVMIDs(qmList, pctList)
-	runningVMIDs := getRunningVMIDs(qmList, pctList)
+
+	allVMIDs := GetAllVMIDs(vms)
+	runningVMIDs := GetRunningVMIDs(vms)
 
 	for _, pool := range poolList {
 		pending := Pending{Pool: pool, Hosname: env.hostname}
@@ -301,26 +347,25 @@ func main() {
 		allZFS, err := ZFSlist(executor, pool)
 		checkErr(err)
 
-		// все датасеты, которые связаны с VM
+		// All datasets related to VMs
 		allZFS = filterZfsInVms(allZFS, allVMIDs)
 
-		// датасеты, которые связаны с запущенными VM
+		// Datasets related to running VMs
 		runningZFS := filterZfsInVms(allZFS, runningVMIDs)
 
 		pendingStopZFS := getPendingStopZFS(allZFS, runningZFS, env.hostname)
-
 		pendingStartZFS := getPendingStartZFS(allZFS, runningZFS, env.hostname)
 
 		processPendingsZFS(&pending, pendingStopZFS, pendingStartZFS, env)
 
-		// Фильтруем nosnap zfs датасеты
+		// Filter nosnap datasets
 		runningZFS = filterNoSnap(runningZFS)
 
 		for _, zfs := range runningZFS {
 			snapshots, err := ZfsListSnapshots(executor, zfs.name)
 			checkErr(err)
 
-			// снапшоты сгруппированные по типам и отфильтрованы по шаблону
+			// Snapshots grouped by types and filtered by pattern
 			groupedSnapshots := splitSnapshots(snapshots)
 
 			processSnapshots(&pending, groupedSnapshots[yearly], zfs.name, yearly, env.policy[yearly], env.time.unix, env.time.human)
