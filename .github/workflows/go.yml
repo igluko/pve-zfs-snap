@@ -13,6 +13,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Добавлено для предоставления необходимых разрешений
     steps:
     - uses: actions/checkout@v3
 
